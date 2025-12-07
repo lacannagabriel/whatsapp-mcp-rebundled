@@ -1,24 +1,23 @@
-# Multi-stage build for WhatsApp MCP Server
-FROM golang:1.21-alpine AS go-builder
-
-# Install build dependencies
-RUN apk add --no-cache gcc musl-dev sqlite-dev
-
-# Build WhatsApp bridge
-WORKDIR /app/whatsapp-bridge
-COPY whatsapp-bridge/go.mod whatsapp-bridge/go.sum ./
-RUN go mod download
-COPY whatsapp-bridge/ ./
-RUN CGO_ENABLED=1 go build -o whatsapp-bridge main.go
-
-# Python stage
+# Single stage build with Go + Python
 FROM python:3.11-slim
 
-# Install system dependencies
+# Install system dependencies including Go
 RUN apt-get update && apt-get install -y \
     sqlite3 \
     ffmpeg \
+    wget \
+    curl \
+    gcc \
     && rm -rf /var/lib/apt/lists/*
+
+# Install Go
+RUN wget https://go.dev/dl/go1.21.5.linux-amd64.tar.gz && \
+    tar -C /usr/local -xzf go1.21.5.linux-amd64.tar.gz && \
+    rm go1.21.5.linux-amd64.tar.gz
+
+ENV PATH=$PATH:/usr/local/go/bin
+ENV GOPATH=/go
+ENV PATH=$PATH:$GOPATH/bin
 
 # Install uv
 RUN pip install uv
@@ -26,8 +25,10 @@ RUN pip install uv
 # Create app directory
 WORKDIR /app
 
-# Copy Go bridge binary
-COPY --from=go-builder /app/whatsapp-bridge/whatsapp-bridge /app/whatsapp-bridge/whatsapp-bridge
+# Copy and setup Go bridge
+COPY whatsapp-bridge/ /app/whatsapp-bridge/
+WORKDIR /app/whatsapp-bridge
+RUN go mod download
 
 # Copy Python MCP server
 COPY whatsapp-mcp-server/ /app/whatsapp-mcp-server/

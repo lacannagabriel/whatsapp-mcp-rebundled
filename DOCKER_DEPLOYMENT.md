@@ -4,26 +4,57 @@ Este guia mostra como executar o WhatsApp MCP Server em um container Docker com 
 
 ## 🚀 Quick Start
 
-### 1. Build e Start do Container
+### Método Rápido (com script helper)
+
+```bash
+# Tornar o script executável (primeira vez)
+chmod +x mcp.sh
+
+# Iniciar (mostra QR code)
+./mcp.sh start
+
+# Ver comandos disponíveis
+./mcp.sh
+```
+
+### Método Manual
 
 ```bash
 # Build e iniciar com docker-compose
 docker-compose up --build
 
-# Ou em modo detached (background)
+# Ou em modo detached (background) - NÃO RECOMENDADO na primeira vez
 docker-compose up --build -d
 ```
 
+**⚠️ IMPORTANTE na primeira execução**: Rode **SEM** `-d` para ver o QR code no terminal!
+
 ### 2. Autenticação WhatsApp (Primeira vez)
 
-Na primeira execução, você precisará escanear um QR code para autenticar com o WhatsApp:
+Na primeira execução, o Go bridge (`main.go`) irá gerar um QR code no terminal:
 
 ```bash
-# Ver os logs do container
+# Se rodou com -d, veja os logs:
 docker logs -f whatsapp-mcp-server
 ```
 
-Procure pelo QR code nos logs e escaneie com seu WhatsApp no celular (Configurações > Dispositivos Conectados > Conectar Dispositivo).
+**Você verá algo assim:**
+```
+Starting WhatsApp Bridge on port 8080...
+2025/12/07 12:34:56 QR code:
+████ ▄▄▄▄▄ █▀█ █▄▀▄▀▄█ ▄▄▄▄▄ ████
+████ █   █ █▀▀▀█ ▄ ▄█ █   █ ████
+████ █▄▄▄█ █▀ █▀▀ ▀▄█ █▄▄▄█ ████
+...
+```
+
+**Como escanear:**
+1. Abra o WhatsApp no celular
+2. Vá em **Configurações** > **Dispositivos Conectados** > **Conectar Dispositivo**
+3. Escaneie o QR code que apareceu no terminal
+4. Aguarde a sincronização (o histórico será baixado para o banco local)
+
+Após autenticar, o WhatsApp Bridge ficará rodando e sincronizando mensagens automaticamente! 🎉
 
 ### 3. Acessar o MCP Server
 
@@ -35,13 +66,37 @@ O servidor estará disponível em:
 
 ```
 whatsapp-mcp/
-├── Dockerfile              # Multi-stage build (Go + Python)
+├── Dockerfile              # Single-stage: Go + Python
 ├── docker-compose.yml      # Configuração do container
 ├── docker-entrypoint.sh    # Script de inicialização
 ├── whatsapp-bridge/        # Go bridge para WhatsApp
+│   ├── main.go            # Roda com `go run` no container
 │   └── store/             # Databases persistidos (volume)
+│       ├── whatsapp.db    # Sessão/credenciais WhatsApp
+│       └── messages.db    # Histórico completo de mensagens
 └── whatsapp-mcp-server/   # Python MCP server
+    └── main.py            # Servidor MCP em Streamable HTTP
 ```
+
+## 🔄 Como Funciona
+
+1. **WhatsApp Bridge (Go)**:
+   - Roda `go run main.go` dentro do container
+   - Conecta com WhatsApp Web via `whatsmeow`
+   - Sincroniza mensagens continuamente
+   - Armazena tudo localmente em SQLite (`store/messages.db`)
+   - Expõe API REST na porta 8080 (interna)
+
+2. **MCP Server (Python)**:
+   - Consome o banco SQLite local do bridge
+   - Expõe ferramentas MCP via Streamable HTTP na porta 8000
+   - Clientes (Claude, Cursor, etc) se conectam via HTTP
+   - Responde queries consultando o histórico local
+
+3. **Fluxo de Dados**:
+   ```
+   WhatsApp → Go Bridge → SQLite Local → Python MCP → Cliente HTTP
+   ```
 
 ## 🔧 Configuração
 
@@ -63,10 +118,13 @@ environment:
 ### Volumes
 
 O volume `./whatsapp-bridge/store` é montado para persistir:
-- `whatsapp.db`: Sessão do WhatsApp
-- `messages.db`: Banco de dados de mensagens
+- `whatsapp.db`: Sessão do WhatsApp (credenciais)
+- `messages.db`: Histórico completo de mensagens sincronizado
 
-**Importante**: Não delete esse diretório ou você terá que re-autenticar!
+**Importante**: 
+- Não delete esse diretório ou você terá que re-autenticar!
+- O histórico é sincronizado automaticamente pelo Go bridge
+- O MCP server consome esse banco de dados local para responder queries
 
 ## 🔌 Como Conectar Clientes
 
@@ -117,36 +175,60 @@ curl -X POST http://localhost:8000/mcp/v1/ \
 
 ## 🛠️ Comandos Úteis
 
-### Ver logs em tempo real
+### Com Script Helper
+
 ```bash
-docker-compose logs -f
+./mcp.sh start        # Iniciar e ver QR code
+./mcp.sh start-bg     # Iniciar em background
+./mcp.sh logs         # Ver logs (para ver QR code)
+./mcp.sh stop         # Parar
+./mcp.sh restart      # Reiniciar
+./mcp.sh status       # Ver status
+./mcp.sh test         # Testar endpoint
+./mcp.sh test-chats   # Listar chats (teste rápido)
+./mcp.sh shell        # Acessar bash do container
+./mcp.sh reset-auth   # Re-autenticar (remove sessão)
+./mcp.sh rebuild      # Rebuild completo
+./mcp.sh clean        # Limpar tudo
 ```
 
-### Parar o container
+### Comandos Manuais
+
+#### Ver logs em tempo real
+```bash
+docker-compose logs -f
+# ou
+docker logs -f whatsapp-mcp-server
+```
+
+#### Parar o container
 ```bash
 docker-compose down
 ```
 
-### Reiniciar o container
+#### Reiniciar o container
 ```bash
 docker-compose restart
 ```
 
-### Rebuild completo
+#### Rebuild completo
 ```bash
 docker-compose down
 docker-compose up --build
 ```
 
-### Acessar shell do container
+#### Acessar shell do container
 ```bash
 docker exec -it whatsapp-mcp-server /bin/bash
 ```
 
-### Ver status do WhatsApp
+#### Ver status do WhatsApp
 ```bash
 # Verificar se está autenticado
 docker exec whatsapp-mcp-server sqlite3 /app/whatsapp-bridge/store/whatsapp.db "SELECT * FROM whatsmeow_device;"
+
+# Ver estatísticas de mensagens
+docker exec whatsapp-mcp-server sqlite3 /app/whatsapp-bridge/store/messages.db "SELECT COUNT(*) as total_messages FROM messages;"
 ```
 
 ## 🔍 Troubleshooting

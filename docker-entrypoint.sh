@@ -6,7 +6,7 @@ echo "Starting WhatsApp MCP Server..."
 # Start the WhatsApp bridge in the background
 echo "Starting WhatsApp Bridge on port 8080..."
 cd /app/whatsapp-bridge
-./whatsapp-bridge &
+go run main.go &
 BRIDGE_PID=$!
 
 echo "Waiting for WhatsApp Bridge to be ready..."

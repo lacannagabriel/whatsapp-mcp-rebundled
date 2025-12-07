@@ -11,11 +11,15 @@ services:
       - "8080:8080"  # WhatsApp bridge API
     volumes:
       # Persist WhatsApp session and message databases
+      # IMPORTANTE: Na primeira vez, rode `docker logs -f whatsapp-mcp-server` 
+      # para ver o QR code e escanear com o WhatsApp
       - ./whatsapp-bridge/store:/app/whatsapp-bridge/store
     environment:
       - WHATSAPP_BRIDGE_URL=http://localhost:8080
       - MCP_HTTP_PORT=8000
     restart: unless-stopped
+    stdin_open: true  # Mantém stdin aberto para o Go interagir
+    tty: true         # Aloca um pseudo-TTY para output do QR code
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
